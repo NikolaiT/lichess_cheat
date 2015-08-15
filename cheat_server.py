@@ -1,6 +1,13 @@
 #!/usr/bin/env python3
 
+# https://github.com/NikolaiT/lichess_cheat
+# Implements a RESTful Api to the stockfish engine.
+# You may call this RESTful API with a request as the follows:
+# http://localhost:8888/allMoves/e2e4 e7e5/incrementTime/1/remainingTime/60/
+# All times are in seconds.
+
 __author__ = 'Nikolai Tschacher'
+__contact__ = 'incolumitas.com'
 __date__ = 'Summer 2015'
 
 import subprocess
@@ -20,7 +27,9 @@ config = {
   'stockfish_download_link': 'https://stockfish.s3.amazonaws.com/stockfish-6-{}.zip',
 	'stockfish_binary' : '', # the path to your local stockfish binary
   'pwd': os.path.dirname(os.path.realpath(__file__)),
-  'debug': False
+  'debug': True,
+  'thinking_time': 1,
+  'max_thinking_time': 2, # in seconds
 }
 
 def unzip(source_filename, dest_dir):
@@ -79,7 +88,7 @@ def install_stockfish():
 class StockfishEngine():
   """Implements all engine related stuff"""
   
-  def __init__(self, stockfish_plays_white=True, thinking_time=1):
+  def __init__(self, stockfish_plays_white=True):
     """
     Sets the engine up.
     
@@ -87,26 +96,29 @@ class StockfishEngine():
     stockfish is white, it needs to make the first move.
     
     thinking_time controls how much time stockfish is given to calculate its moves.
+    max_thinking_time determines the maximum thinking time the engine has.
     """
-    self.thinking_time = thinking_time
+    self.max_thinking_time = config.get('max_thinking_time', 2)
+    self.thinking_time = config.get('thinking_time', 1)
     self.stockfish_plays_white = stockfish_plays_white
     self.proc = None
     self.moves = []
-    install_stockfish()
+    self.fen = ''
+    
     self.init_stockfish()
     
-  def get(self, poll=True):
+  def get(self, poll=True, sleep_time=0):
     if poll:
       self.proc.stdin.write('isready\n')
     buf = ''
     while True:
+      time.sleep(sleep_time)
       line = self.proc.stdout.readline().strip()
       buf += line
       if 'readyok' in line:
         return buf
       if 'bestmove' in line:
         return buf
- 
  
   def init_stockfish(self):
     if os.path.exists(config['stockfish_binary']):
@@ -122,6 +134,7 @@ class StockfishEngine():
       # stolen from https://github.com/brandonhsiao/lichess-bot/blob/master/server.py
       self.proc.stdin.write('ucinewgame\n')
       self.get()
+      # some of theese options are not supported. Doesn't harm us...
       self.proc.stdin.write('setoption name Hash value 128\n')
       self.proc.stdin.write('setoption name Threads value 4\n')
       self.proc.stdin.write('setoption name Best Book Move value true\n')
@@ -130,94 +143,101 @@ class StockfishEngine():
       self.proc.stdin.write('setoption name Contempt Factor value 50\n')
     else:
       raise ValueError('No stockfish binary path given')
-      
- 
-  def make_move(self, move=None, thinking_time=1):
-    if thinking_time != self.thinking_time:
-      self.thinking_time = thinking_time
     
-    if move:
-      self.moves.append(move)
+  def whos_move_is_it(self):
+    return 'white' if (len(self.moves) % 2 == 0) else 'black'
       
-    if self.moves:
-      cmd = 'position startpos moves {}\n'.format(' '.join(self.moves))
+  def start_move_calculation(self, remaining_time=None, increment_time=None):
+    """
+    When remaining_time and increment_time are given, the best move
+    is calculated considering the remaining time. If not, the thinking_time
+    given in the config is considered.
+    """
+    if remaining_time and increment_time:
+      remaining_time, increment_time = int(remaining_time) * 1000, int(increment_time) * 1000
+      if self.whos_move_is_it() == 'white':
+        cmd = 'go wtime {} winc {}\n'.format(remaining_time, increment_time)
+      else:
+        cmd = 'go btime {} binc {}\n'.format(remaining_time, increment_time)
+      
       self.proc.stdin.write(cmd)
-      
-    return self.start_move_calculation()
+      out = self.get(poll=False)
+    else:
+      self.proc.stdin.write('go infinite\n')
+      sleep_time = self.thinking_time if self.max_thinking_time < self.thinking_time else self.max_thinking_time
+      try:
+        time.sleep(float(sleep_time))
+      except ValueError as ve:
+        print(ve)
+        sys.exit(0)
+      self.proc.stdin.write('stop\n')
+      out = self.get(poll=False)
     
-      
-  def start_move_calculation(self):      
-    self.proc.stdin.write('go infinite\n')
-    try:
-      time.sleep(float(self.thinking_time))
-    except ValueError as ve:
-      print(ve)
-      sys.exit(0)
-    self.proc.stdin.write('stop\n')
-    out = self.get(False)
     try:
       bestmove = re.search(r'bestmove\s(?P<move>[a-h][1-8][a-h][1-8])', out).group('move')
       ponder = re.search(r'ponder\s(?P<ponder>[a-h][1-8][a-h][1-8])', out).group('ponder')
     except AttributeError:
       return False
-      
-    self.moves.append(bestmove)
-    
-    return bestmove
+
+    return bestmove, ponder
  
- 
-  def newgame_stockfish(self, stockfish_plays_white=True, fen='', all_moves=None):
+  def newgame_stockfish(self, stockfish_plays_white=True, fen='',
+              all_moves=None, remaining_time=None, increment_time=None):
     self.stockfish_plays_white = stockfish_plays_white
     self.moves = []
     
     if fen:
+      self.fen = fen
       self.proc.stdin.write('position fen {}\n'.format(fen))
-      return self.start_move_calculation()
+      return self.start_move_calculation(remaining_time, increment_time)
       
     if all_moves is not None:
+      self.moves = all_moves.split(' ')
       if all_moves:
         self.proc.stdin.write('position startpos moves {}\n'.format(all_moves))
       else:
         self.proc.stdin.write('position startpos\n')
       
-      return self.start_move_calculation()
+      return self.start_move_calculation(remaining_time, increment_time)
       
-    if self.stockfish_plays_white:
-      return self.make_move()
-      
-   
   def quit_stockfish(self):
     self.proc.stdin.write('quit\n')
     self.proc.terminate()
   
   
 class StockfishServer(BaseHTTPRequestHandler):
+  
+    def get_param(self, names):
+      if not isinstance(names, tuple):
+        raise ValueError('variable "names" must be a tuple')
+      
+      ns = {}
+      for name in names:
+        try:
+          ns[name] = re.search(r'{name}/(?P<{name}>[^/]*?)/'.format(name=name), self.path).group(name)
+        except:
+          ns[name] = None
+      
+      return ns
+      
     def do_GET(self):
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        if self.path.startswith('/newgame_'):
-          playing_white = self.path.startswith('/newgame_white')
-          move = engine.newgame_stockfish(stockfish_plays_white=playing_white)
-          if not move:
-            move = ''
-          self.wfile.write(bytes(move, "utf-8"))
-        elif self.path.startswith('/moved_'):
-          regex = re.compile(r'/moved_(?P<move>\w*?)_')
-          move = regex.match(self.path).group('move')
-          m = engine.make_move(move=move)
-          self.wfile.write(bytes(m, "utf-8"))
-        elif self.path.startswith('/lastPosFen_'):
-          regex = re.compile(r'/lastPosFen_(?P<fen>.*)_')
-          fen = regex.match(self.path).group('fen')
-          move = engine.newgame_stockfish(fen=unquote(fen))
-          self.wfile.write(bytes(move, "utf-8"))
-        elif self.path.startswith('/allMoves_'):
-          regex = re.compile(r'/allMoves_(?P<allMoves>.*)_')
-          all_moves = regex.match(self.path).group('allMoves')
-          move = engine.newgame_stockfish(all_moves=unquote(all_moves))
-          self.wfile.write(bytes(move, "utf-8"))
+        if self.path.startswith('/lastPosFen/'):
+          fen = self.get_param(('lastPosFen', )).get('lastPosFen', '')
+          best, ponder = engine.newgame_stockfish(fen=unquote(fen))
+          self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
+        elif self.path.startswith('/allMoves/'):
+          params = self.get_param(('allMoves', 'remainingTime', 'incrementTime'))
+          if config.get('debug', False):
+            pprint.pprint(params)
+          best, ponder = engine.newgame_stockfish(
+                          all_moves=unquote(params['allMoves']),
+                          remaining_time=params['remainingTime'],
+                          increment_time=params['incrementTime'])
+          self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
 
 def run(engine, server_class=HTTPServer, handler_class=StockfishServer):
     server_address = ('', 8888)
