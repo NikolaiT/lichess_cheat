@@ -10,6 +10,7 @@ __author__ = 'Nikolai Tschacher'
 __contact__ = 'incolumitas.com'
 __date__ = 'Summer 2015'
 
+import string
 import subprocess
 import os
 import time
@@ -23,6 +24,9 @@ import socketserver
 import zipfile
 import pprint
 
+def gen_password(n=10):
+  return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(n))
+
 config = {
   'stockfish_download_link': 'https://stockfish.s3.amazonaws.com/stockfish-6-{}.zip',
 	'stockfish_binary' : '', # the path to your local stockfish binary
@@ -30,6 +34,8 @@ config = {
   'debug': True,
   'thinking_time': 1,
   'max_thinking_time': 2, # in seconds
+  'js_cheat_file': 'cheat_v2.js',
+  'password': gen_password(),
 }
 
 def unzip(source_filename, dest_dir):
@@ -84,7 +90,36 @@ def install_stockfish():
   if config.get('debug', False):
     pprint.pprint(config)
   
+
+def javascript_clipboard_widget():
+  # from tkinter import Tk, Scrollbar, Text, mainloop
+
+  # root = Tk()
+  # S = Scrollbar(root)
+  # T = Text(root, height=20, width=50)
+  # S.pack(side=RIGHT, fill=Y)
+  # T.pack(side=LEFT, fill=Y)
+  # S.config(command=T.yview)
+  # T.config(yscrollcommand=S.set)
+  # T.insert(END, js_text)
+  # mainloop()
+  import webbrowser
+
+  js_file = os.path.join(config['pwd'], config['js_cheat_file'])
+  js_text = open(js_file, 'r').readlines()
+
+  # replace with password generated
+  newlines = []
+  replacement = "  var passwordKey = '{}';\n".format(config['password'])
+  for line in js_text:
+    newlines.append(replacement if 'var passwordKey' in line else line)
   
+  with open(js_file, 'wt') as f:
+    f.write(''.join(newlines))
+
+  webbrowser.open('file://' + js_file)
+  
+
 class StockfishEngine():
   """Implements all engine related stuff"""
   
@@ -161,17 +196,18 @@ class StockfishEngine():
         cmd = 'go btime {} binc {}\n'.format(remaining_time, increment_time)
       
       self.proc.stdin.write(cmd)
-      out = self.get(poll=False)
+      sleep_time = self.max_thinking_time
     else:
       self.proc.stdin.write('go infinite\n')
       sleep_time = self.thinking_time if self.max_thinking_time < self.thinking_time else self.max_thinking_time
-      try:
-        time.sleep(float(sleep_time))
-      except ValueError as ve:
-        print(ve)
-        sys.exit(0)
-      self.proc.stdin.write('stop\n')
-      out = self.get(poll=False)
+
+    try:
+      time.sleep(float(sleep_time))
+    except ValueError as ve:
+      print(ve)
+      sys.exit(0)
+    self.proc.stdin.write('stop\n')
+    out = self.get(poll=False)
     
     try:
       bestmove = re.search(r'bestmove\s(?P<move>[a-h][1-8][a-h][1-8])', out).group('move')
@@ -224,25 +260,32 @@ class StockfishServer(BaseHTTPRequestHandler):
       return ns
       
     def do_GET(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Content-type', 'text/html')
-        self.end_headers()
+        params = {}
+        best, ponder = '', ''
+        
         if self.path.startswith('/lastPosFen_'):
-          params = self.get_param(('lastPosFen', ), delimiter='_')
+          params = self.get_param(('lastPosFen', 'passwordKey'), delimiter='_')
           best, ponder = engine.newgame_stockfish(fen=unquote(params['lastPosFen']))
-          self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
         elif self.path.startswith('/allMoves/'):
-          params = self.get_param(('allMoves', 'remainingTime', 'incrementTime'))
+          params = self.get_param(('allMoves', 'remainingTime', 'incrementTime', 'passwordKey'))
           if config.get('debug', False):
             pprint.pprint(params)
           best, ponder = engine.newgame_stockfish(
                           all_moves=unquote(params['allMoves']),
                           remaining_time=params['remainingTime'],
                           increment_time=params['incrementTime'])
+
+        if params.get('passwordKey', '') == config['password']:
+          self.send_response(200)
+          self.send_header('Access-Control-Allow-Origin', '*')
+          self.send_header('Content-type', 'text/html')
+          self.end_headers()
           self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
+        else:
+          self.send_response(404)
 
 def run(engine, server_class=HTTPServer, handler_class=StockfishServer):
+    javascript_clipboard_widget()
     server_address = ('', 8888)
     httpd = server_class(server_address, handler_class)
     print('[+] Running CheatServer.py on {}:{}'.format(server_address[0], server_address[1]))

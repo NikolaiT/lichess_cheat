@@ -12,13 +12,14 @@
 
 (function() {
  
- var allMoves = '';
- var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
- var ply = -1;
- var uci = null;
- var playerColor = $('.cg-board').hasClass('orientation-black') ? 'black' : 'white';
- var debug = true;
- var movesBy = 'moves';
+  var passwordKey = 'VLLWDIKV56';
+  var allMoves = '';
+  var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
+  var ply = -1;
+  var uci = null;
+  var playerColor = $('.cg-board').hasClass('orientation-black') ? 'black' : 'white';
+  var debug = true;
+  var movesBy = 'moves';
 
   function addEngineProposalClass() {
       $("<style>")
@@ -95,12 +96,14 @@
 
       if (what === 'fen') {
         url = "http://localhost:8888/lastPosFen_" 
-                + getLatestPositionAsFenByAPI().posAsFen + "_";
+                + getLatestPositionAsFenByAPI().posAsFen + "_passwordKey_"
+                + passwordKey + '_';
       } else if (what === 'moves') {
         url = "http://localhost:8888/allMoves/"
              + allMoves + "/incrementTime/"
              + incrementTime + "/remainingTime/"
-             + getRemainingTime() + "/";
+             + getRemainingTime() + "/passwordKey/" 
+             + passwordKey + '/';
       }
       
       $.ajax({
