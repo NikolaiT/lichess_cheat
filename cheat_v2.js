@@ -18,6 +18,7 @@
  var uci = null;
  var playerColor = $('.cg-board').hasClass('orientation-black') ? 'black' : 'white';
  var debug = true;
+ var movesBy = 'moves';
 
   function addEngineProposalClass() {
       $("<style>")
@@ -53,12 +54,13 @@
   }
 
   function getLastMove() {
+      // https://github.com/ornicar/lila/commit/372e492c16e88c21de6b063a059f9b66dc8b5c6a
       
       function getMove(s) { return s.match(/[a-h][0-8]/g); };
       
       try {
-        var to = getMove($('.cg-square.last-move.occupied').attr('class'));
-        var from = getMove($('.cg-square.last-move').not('.occupied').attr('class'));
+        var to = getMove($('.last-move.oc, .last-move.occupied').attr('class'));
+        var from = getMove($('.last-move').not('.oc, .occupied').attr('class'));
       } catch (e) {
         return '';
       }
@@ -72,16 +74,41 @@
     return minutes * 60 + parseInt(time.slice(-2));
   }
 
-  function getEngineMoveByAllMoves() {
-      var bestMoves = '';
+  function getLatestPositionAsFenByAPI() {
+    var gameState = {ply: -1, posAsFen: null};
+
+    $.ajax({
+      dataType: 'json',
+      url: 'http://en.lichess.org/api/game/'+ document.URL.split('.org/').slice(-1)[0] +'?with_moves=1&with_fens=1',
+      async: false,
+      success: function(game) {
+        gameState.posAsFen = game.fens.slice(-1)[0];
+        gameState.ply = parseInt(game.turns);
+      }});
+
+    return gameState;
+  }
+
+  function getEngineMoveBy(what) {
+      var bestMoves = '',
+          url = '';
+
+      if (what === 'fen') {
+        url = "http://localhost:8888/lastPosFen_" 
+                + getLatestPositionAsFenByAPI().posAsFen + "_";
+      } else if (what === 'moves') {
+        url = "http://localhost:8888/allMoves/"
+             + allMoves + "/incrementTime/"
+             + incrementTime + "/remainingTime/"
+             + getRemainingTime() + "/";
+      }
       
       $.ajax({
-        // /allMoves/e2e4 e7e5/incrementTime/1/remainingTime/60/
-      url: "http://localhost:8888/allMoves/" + allMoves + "/incrementTime/" + incrementTime + "/remainingTime/" + getRemainingTime() + "/",
-      success: function(html) {
-        bestMoves = html;
-      },
-      async:false
+        url: url,
+        success: function(html) {
+          bestMoves = html;
+        },
+        async:false
       });
       
       return {
@@ -98,7 +125,7 @@
 
   function showEngineMove() {
       if (isMyTurn()) {
-          engineMoves = getEngineMoveByAllMoves();
+          engineMoves = getEngineMoveBy(movesBy);
           highlightEngineProposal(engineMoves);
       }
   }

@@ -59,13 +59,13 @@ def install_stockfish():
   
   if os.name == 'nt':
     dl = dl.format('windows')
-    binary_path = os.path.join(config.get('pwd'), 'Windows\\stockfish-6-64.exe')
+    binary_path = os.path.join(config.get('pwd'), 'stockfish\\Windows\\stockfish-6-64.exe')
   elif os.name == 'posix' and sys.platform.startswith('linux'):
     dl = dl.format('linux')
-    binary_path = os.path.join(config.get('pwd'), 'stockfish-6-linux/Linux/stockfish-6-linux/Linux/stockfish_6_x64')
+    binary_path = os.path.join(config.get('pwd'), 'stockfish/stockfish-6-linux/Linux/stockfish-6-linux/Linux/stockfish_6_x64')
   elif sys.platform.startswith('darwin'):
     dl = dl.format('mac')
-    binary_path = os.path.join(config.get('pwd'), 'stockfish-6-mac/Mac/stockfish-6-64')
+    binary_path = os.path.join(config.get('pwd'), 'stockfish/stockfish-6-mac/Mac/stockfish-6-64')
   else:
     exit('System {} is not supported.'.format(os.name))
     
@@ -73,7 +73,7 @@ def install_stockfish():
     save_in = os.path.join(config.get('pwd'), 'stockfish.zip')
     request = urllib.request.URLopener()
     request.retrieve(dl, save_in)
-    unzip(save_in, config.get('pwd'))
+    unzip(save_in, os.path.join(config.get('pwd'), 'stockfish'))
     os.unlink(save_in)
     
     if sys.platform.startswith('linux') or sys.platform.startswith('darwin'):
@@ -207,15 +207,18 @@ class StockfishEngine():
   
 class StockfishServer(BaseHTTPRequestHandler):
   
-    def get_param(self, names):
+    def get_param(self, names, delimiter='/'):
       if not isinstance(names, tuple):
         raise ValueError('variable "names" must be a tuple')
       
       ns = {}
       for name in names:
         try:
-          ns[name] = re.search(r'{name}/(?P<{name}>[^/]*?)/'.format(name=name), self.path).group(name)
-        except:
+          ns[name] = re.search(r'{name}{delimiter}(?P<{name}>[^{delimiter}]*?){delimiter}'.format(
+            name=name,
+            delimiter=delimiter), self.path).group(name)
+        except Exception as e:
+          print(e)
           ns[name] = None
       
       return ns
@@ -225,9 +228,9 @@ class StockfishServer(BaseHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Origin', '*')
         self.send_header('Content-type', 'text/html')
         self.end_headers()
-        if self.path.startswith('/lastPosFen/'):
-          fen = self.get_param(('lastPosFen', )).get('lastPosFen', '')
-          best, ponder = engine.newgame_stockfish(fen=unquote(fen))
+        if self.path.startswith('/lastPosFen_'):
+          params = self.get_param(('lastPosFen', ), delimiter='_')
+          best, ponder = engine.newgame_stockfish(fen=unquote(params['lastPosFen']))
           self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
         elif self.path.startswith('/allMoves/'):
           params = self.get_param(('allMoves', 'remainingTime', 'incrementTime'))
