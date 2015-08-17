@@ -12,7 +12,7 @@
 
 (function() {
  
-  var passwordKey = 'VLLWDIKV56';
+  var passwordKey = 'AHKMOP7UJP';
   var allMoves = '';
   var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
   var ply = -1;
@@ -29,12 +29,7 @@
               border-color: #FF4D4D;\
               border-width: 3px;\
               border-style: solid;\
-          };\
-          .enginePonderProposal {\
-              border-color: #5CADFF;\
-              border-width: 2px;\
-              border-style: solid;\
-          }")
+          };")
           .appendTo("head");
   }
   
@@ -50,8 +45,10 @@
       $('.cg-square.' + bfrom).addClass('engineProposal');
       $('.cg-square.' + bto).addClass('engineProposal');
       
-      $('.cg-square.' + pfrom).addClass('enginePonderProposal');
-      $('.cg-square.' + pto).addClass('enginePonderProposal');
+      if (debug) { console.log('Engine proposal: ' + pfrom + pto); }
+      
+      $('.cg-square.' + pfrom).addClass('engineProposal').css('border-color: blue');
+      $('.cg-square.' + pto).addClass('engineProposal').css('border-color: blue');
   }
 
   function getLastMove() {
@@ -90,9 +87,8 @@
     return gameState;
   }
 
-  function getEngineMoveBy(what) {
-      var bestMoves = '',
-          url = '';
+  function getEngineMoveBy(what, callback) {
+      var url = '';
 
       if (what === 'fen') {
         url = "http://localhost:8888/lastPosFen_" 
@@ -109,15 +105,13 @@
       $.ajax({
         url: url,
         success: function(html) {
-          bestMoves = html;
+          callback({
+            'best': html.slice(0, 4),
+            'ponder': html.slice(5,9)
+          });
         },
-        async:false
+        async:true
       });
-      
-      return {
-        'best': bestMoves.slice(0, 4),
-        'ponder': bestMoves.slice(5,9)
-      };
   }
   
   function isMyTurn() {
@@ -128,8 +122,7 @@
 
   function showEngineMove() {
       if (isMyTurn()) {
-          engineMoves = getEngineMoveBy(movesBy);
-          highlightEngineProposal(engineMoves);
+          getEngineMoveBy(movesBy, highlightEngineProposal);
       }
   }
   

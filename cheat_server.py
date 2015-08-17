@@ -254,7 +254,6 @@ class StockfishServer(BaseHTTPRequestHandler):
             name=name,
             delimiter=delimiter), self.path).group(name)
         except Exception as e:
-          print(e)
           ns[name] = None
       
       return ns
@@ -268,12 +267,14 @@ class StockfishServer(BaseHTTPRequestHandler):
           best, ponder = engine.newgame_stockfish(fen=unquote(params['lastPosFen']))
         elif self.path.startswith('/allMoves/'):
           params = self.get_param(('allMoves', 'remainingTime', 'incrementTime', 'passwordKey'))
-          if config.get('debug', False):
-            pprint.pprint(params)
           best, ponder = engine.newgame_stockfish(
                           all_moves=unquote(params['allMoves']),
                           remaining_time=params['remainingTime'],
                           increment_time=params['incrementTime'])
+
+        if config.get('debug', False):
+          pprint.pprint(params)
+          print('Server Key: {}, Request Key: {}'.format(config['password'], params.get('passwordKey', '')))
 
         if params.get('passwordKey', '') == config['password']:
           self.send_response(200)
@@ -282,7 +283,8 @@ class StockfishServer(BaseHTTPRequestHandler):
           self.end_headers()
           self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
         else:
-          self.send_response(404)
+          if config.get('debug', False):
+            print('Invalid request without password. Blocking.')
 
 def run(engine, server_class=HTTPServer, handler_class=StockfishServer):
     javascript_clipboard_widget()
