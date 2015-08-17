@@ -64,8 +64,8 @@ def install_stockfish():
   binary_path = ''
   
   if os.name == 'nt':
-    dl = dl.format('windows')
-    binary_path = os.path.join(config.get('pwd'), 'stockfish\\Windows\\stockfish-6-64.exe')
+    dl = dl.format('win')
+    binary_path = os.path.join(config.get('pwd'), 'stockfish/stockfish-6-win\\Windows\\stockfish-6-win\\Windows\\stockfish-6-64.exe')
   elif os.name == 'posix' and sys.platform.startswith('linux'):
     dl = dl.format('linux')
     binary_path = os.path.join(config.get('pwd'), 'stockfish/stockfish-6-linux/Linux/stockfish-6-linux/Linux/stockfish_6_x64')
