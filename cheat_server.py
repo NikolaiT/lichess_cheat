@@ -160,7 +160,7 @@ class StockfishEngine():
       self.proc = subprocess.Popen([config['stockfish_binary']], universal_newlines=True,
                   stdout=subprocess.PIPE, stdin=subprocess.PIPE)
    
-      greeting = self.get(self.proc)
+      greeting = self.get()
       if not 'Stockfish' in greeting:
         raise ValueError('Couldnt execute stockfish')
    

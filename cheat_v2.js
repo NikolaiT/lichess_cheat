@@ -12,7 +12,7 @@
 
 (function() {
  
-  var passwordKey = 'AHKMOP7UJP';
+  var passwordKey = '8AYLFJGM8K';
   var allMoves = '';
   var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
   var ply = -1;
@@ -47,8 +47,8 @@
       
       if (debug) { console.log('Engine proposal: ' + pfrom + pto); }
       
-      $('.cg-square.' + pfrom).addClass('engineProposal').css('border-color: blue');
-      $('.cg-square.' + pto).addClass('engineProposal').css('border-color: blue');
+      $('.cg-square.' + pfrom).addClass('engineProposal').css('border-color', 'blue');
+      $('.cg-square.' + pto).addClass('engineProposal').css('border-color','blue');
   }
 
   function getLastMove() {
