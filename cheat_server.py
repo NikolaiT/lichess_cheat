@@ -201,12 +201,14 @@ class StockfishEngine():
       self.proc.stdin.write('go infinite\n')
       sleep_time = self.thinking_time if self.max_thinking_time < self.thinking_time else self.max_thinking_time
 
-    try:
-      time.sleep(float(sleep_time))
-    except ValueError as ve:
-      print(ve)
-      sys.exit(0)
-    self.proc.stdin.write('stop\n')
+      try:
+        time.sleep(float(sleep_time))
+      except ValueError as ve:
+        print(ve)
+        sys.exit(0)
+
+      self.proc.stdin.write('stop\n')
+    
     out = self.get(poll=False)
     
     try:

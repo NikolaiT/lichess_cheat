@@ -12,25 +12,38 @@
 
 (function() {
  
-  var passwordKey = '8AYLFJGM8K';
+  var passwordKey = 'OWPWSYMGTT';
   var allMoves = '';
   var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
   var ply = -1;
   var uci = null;
   var playerColor = $('.cg-board').hasClass('orientation-black') ? 'black' : 'white';
-  var debug = true;
+  var debug = false;
   var movesBy = 'moves';
+  var engineProposalClass = '';
+  var engineProposalPonderClass = '';
 
-  function addEngineProposalClass() {
+  function addEngineProposalClass(className, color) {
       $("<style>")
           .prop("type", "text/css")
           .html("\
-          .engineProposal {\
-              border-color: #FF4D4D;\
+          ."+ className + " {\
+              border-color: " + color + ";\
               border-width: 3px;\
               border-style: solid;\
           };")
           .appendTo("head");
+  }
+
+  function hashCode(toHash) {
+    var hash = 0;
+
+    for (i = 0; i < toHash.length; i++) {
+      c = toHash.charCodeAt(i);
+      hash += c ^ 0xFE;
+    }
+
+    return hash.toString();
   }
   
   function highlightEngineProposal(engineMove) {
@@ -39,16 +52,17 @@
           pfrom = engineMove.ponder.slice(0, 2),
           pto = engineMove.ponder.slice(2, 4);
           
-      $('.cg-square').removeClass('engineProposal');
-      $('.cg-square').removeClass('enginePonderProposal');
+      $('.cg-square').removeClass(engineProposalClass);
+      $('.cg-square').removeClass(engineProposalPonderClass);
       
-      $('.cg-square.' + bfrom).addClass('engineProposal');
-      $('.cg-square.' + bto).addClass('engineProposal');
-      
-      if (debug) { console.log('Engine proposal: ' + pfrom + pto); }
-      
-      $('.cg-square.' + pfrom).addClass('engineProposal').css('border-color', 'blue');
-      $('.cg-square.' + pto).addClass('engineProposal').css('border-color','blue');
+
+  if (debug) { console.log('Engine proposal: ' + pfrom + pto); }
+
+      $('.cg-square.' + pfrom).addClass(engineProposalPonderClass);
+      $('.cg-square.' + pto).addClass(engineProposalPonderClass);
+
+      $('.cg-square.' + bfrom).addClass(engineProposalClass);
+      $('.cg-square.' + bto).addClass(engineProposalClass);
   }
 
   function getLastMove() {
@@ -126,8 +140,12 @@
       }
   }
   
-  addEngineProposalClass();
-  
+  engineProposalClass = hashCode('engineProposal' + passwordKey);
+  engineProposalPonderClass = hashCode('enginePonderProposal' + passwordKey);
+
+  addEngineProposalClass(engineProposalClass, 'red');
+  addEngineProposalClass(engineProposalPonderClass, 'blue');
+
   if (playerColor === 'black') {
     uci = '';
     ply++;
