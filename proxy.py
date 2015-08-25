@@ -25,6 +25,9 @@ import logging
 import socket
 import select
 import struct
+import json
+import pprint
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +80,58 @@ CHUNK_PARSER_STATE_COMPLETE = 3
 
 ### Start modificiations by Nikolai Tschacher
 
+def hexdump(src, length=16, sep='.'):
+    """
+    Taken from https://gist.github.com/ImmortalPC/c340564823f283fe530b.
+
+    @brief Return {src} in hex dump.
+    @param[in] length   {Int} Nb Bytes by row.
+    @param[in] sep      {Char} For the text part, {sep} will be used for non ASCII char.
+    @return {Str} The hexdump
+
+    @note Full support for python2 and python3 !
+    """
+    result = []
+
+    # Python3 support
+    try:
+        xrange(0,1)
+    except NameError:
+        xrange = range
+
+    for i in xrange(0, len(src), length):
+        subSrc = src[i:i+length]
+        hexa = ''
+        isMiddle = False
+        for h in xrange(0,len(subSrc)):
+            if h == length/2:
+                hexa += ' '
+            h = subSrc[h]
+            if not isinstance(h, int):
+                h = ord(h)
+            h = hex(h).replace('0x','')
+            if len(h) == 1:
+                h = '0'+h
+            hexa += h+' '
+        hexa = hexa.strip(' ')
+        text = ''
+        for c in subSrc:
+            if not isinstance(c, int):
+                c = ord(c)
+            if 0x20 <= c < 0x7F:
+                text += chr(c)
+            else:
+                text += sep
+        result.append(('%08X:  %-'+str(length*(2+1)+1)+'s  |%s|') % (i, hexa, text))
+
+    print('\n'.join(result))
+
+
 class WebSocketFrame(object):
+    """
+    Some code taken and modified from 
+    http://www.cs.rpi.edu/~goldsd/docs/spring2012-csci4220/websocket-py.txt
+    """
 
     OPCODES = {
         0: 'CONTINUATION_FRAME',
@@ -95,21 +149,69 @@ class WebSocketFrame(object):
         self.masking_key = ''
         self.payload_length = None
         self.payload = ''
+        self.unmasked_payload = ''
 
     def info(self):
-        import json
-        import pprint
-
         print('WebSocket Frame: fin = {}, opcode = {}, mask = {}, masking_key: {}, payload_length = {}'.format(
             self.fin, self.OPCODES.get(self.opcode, 'INVALID'), self.mask, self.masking_key, self.payload_length))
         
         print('Payload:')
         try:
-            nice = json.loads(self.payload)            
+            nice = json.loads(self.unmasked_payload)            
             pprint.pprint(nice)
         except:
-            print(self.payload)
+            print(self.unmasked_payload)
         print('')
+
+    def update_frame(self, new_unmasked_payload):
+        """
+        This method rebuilds the WebSocket frame with the new payload.
+        """
+        if len(self.unmasked_payload) == len(new_unmasked_payload):
+            self.payload = WebSocketFrame.mask_payload(new_unmasked_payload, self.masking_key)
+            self.unmasked_payload = new_unmasked_payload
+        else:
+            raise NotImplementedError('Create static build method for websockets.')
+
+
+    def to_bytes(self):
+        message = ''
+        # always send an entire message as one frame (fin)
+        b1 = 0x80
+        b1 |= self.opcode
+
+        message += chr(b1)
+
+        # maybe mask frame
+        b2 = self.mask << 7
+
+        length = len(self.payload)
+
+        if length < 126:
+            b2 |= length
+            message += chr(b2)
+        elif length < (2 ** 16) - 1:
+            b2 |= 126
+            message += chr(b2)
+            l = struct.pack("!H", length)
+            message += l
+        else:
+            l = struct.pack("!Q", length)
+            b2 |= 127
+            message += chr(b2)
+            message += l
+
+        if self.mask == 1:
+            message += self.masking_key
+
+        message += self.payload
+
+        return message
+
+
+    @staticmethod
+    def mask_payload(payload, mask):
+        return ''.join([chr(ord(b) ^ ord(mask[i % 4])) for i, b in enumerate(payload)])
 
 
     @staticmethod
@@ -141,7 +243,9 @@ class WebSocketFrame(object):
             f.payload = s[payload_start:f.payload_length+payload_start]
 
             if f.mask == 1:
-                f.payload = ''.join([chr(ord(b) ^ ord(f.masking_key[i % 4])) for i, b in enumerate(f.payload)])
+                f.unmasked_payload = WebSocketFrame.mask_payload(f.payload, f.masking_key)
+            else:
+                f.unmasked_payload = f.payload
 
         return f
 
@@ -162,7 +266,9 @@ class ModifyData(object):
         frame = WebSocketFrame.from_bytes(data)
 
         for m in ModifyData.modificators:
-            m.on_outgoing_packet(frame)
+            retval = m.on_outgoing_packet(frame, data)
+            if retval:
+                return retval
 
         return data
 
@@ -172,7 +278,9 @@ class ModifyData(object):
         frame = WebSocketFrame.from_bytes(data)
 
         for m in ModifyData.modificators:
-            m.on_incoming_packet(frame)
+            retval = m.on_incoming_packet(frame)
+            if retval:
+                return retval
 
         return data
 
@@ -205,22 +313,101 @@ class LichessCheat(object):
     payload = {"v":3,"t":"move","d":{"uci":"e4d5","san":"exd5","fen":"rnbqkbnr/ppp1pppp/8/3P4/8/8/PPPP1PPP/RNBQKBNR","ply":3,"clock":{"white":303.3190002441406,"black":300},"dests":{"b8":"d7a6c6","c8":"d7e6f5g4h3","g8":"f6h6","h7":"h6h5","e8":"d7","g7":"g6g5","c7":"c6c5","d8":"d7d6d5","f7":"f6f5","b7":"b6b5","e7":"e6e5","a7":"a6a5"}}}
     """
 
+    GAME_STATE_AWAITING_START = 1
+    GAME_STATE_STARTED = 2
+    GAME_STATE_ENDED = 3
+
     def __init__(self, debug=True):
         self.moves = []
         self.ply = 0
         self.last_pos_fen = ''
         self.debug = debug
+        self.game_state = self.GAME_STATE_AWAITING_START
+        self.playing_white = None
+        self.calculating = False
 
-    def on_outgoing_packet(self, frame):
+        from cheat_server import StockfishEngine
+
+        self.engine = StockfishEngine()
+
+    def get_engine_move(self):
+        engine_move =  self.engine.newgame_stockfish(all_moves=' '.join(self.moves))
+
+        if self.debug:
+            print('EngineMove: {}'.format(str(engine_move)))
+
+        return engine_move[0]
+
+    def parse_json(self, s):
+        """
+        Returns an object from the json string or None.
+        """
+        try:
+            return json.loads(s)
+        except Exception as e:
+            print('Cannot parse json data: {}. Exception: {}'.format(s, str(e)))
+            return None
+
+    def is_my_move(self):
+        return self.playing_white and (self.ply % 2 == 0) or\
+                not self.playing_white and (self.ply % 2 == 1)
+
+    def on_outgoing_packet(self, frame, original_data):
         if self.debug:
             if '"move"' in frame.payload:
                 print('CLIENT --> SERVER')
                 frame.info()
 
-        if 'from' in frame.payload and 'to' in frame.payload:
-            pass
+        if 'from' in frame.unmasked_payload and 'to' in frame.unmasked_payload:
+            if self.game_state == self.GAME_STATE_AWAITING_START:
+                self.playing_white = True
+                self.game_state = self.GAME_STATE_STARTED
+                self.engine.newgame_stockfish(all_moves=' '.join(self.moves), stop_later=True)
+                self.calculating = True
+                time.sleep(2)
+            # we detect an outgoing move triggered by our UI 
+            # and we need to change it to the
+            # engine move.
+            move_obj = self.parse_json(frame.unmasked_payload)
+
+            if move_obj:
+                if self.calculating:
+                    em = self.engine.stop_move_calculation()[0]
+                    self.calculating = False 
+                    new_payload = frame.unmasked_payload.replace(move_obj['d']['from'], em[:2])
+                    new_payload = new_payload.replace(move_obj['d']['to'], em[2:4])
+
+                    if self.debug and False:
+                        print('Original data: ')
+                        hexdump(original_data)
+                        print('Before move update: ')
+                        hexdump(frame.to_bytes())
+
+                    frame.update_frame(new_payload)
+
+                    if self.debug:
+                        print('After move update: ')
+                        hexdump(frame.to_bytes())
+
+                    bs = frame.to_bytes()
+                    return bs
 
     def on_incoming_packet(self, frame):
+
+        if '"uci"' in frame.payload:
+            if self.game_state == self.GAME_STATE_AWAITING_START:
+                self.playing_white = False
+                self.game_state = self.GAME_STATE_STARTED
+
+            move_obj = self.parse_json(frame.unmasked_payload)
+            if move_obj:
+                self.moves.append(move_obj['d']['uci'])
+                self.ply = int(move_obj['d']['ply'])
+
+                if self.is_my_move():
+                    self.engine.newgame_stockfish(all_moves=' '.join(self.moves), stop_later=True)
+                    self.calculating = True
+
         if self.debug:
             if '"move"' in frame.payload:
                 print('SERVER --> CLIENT')

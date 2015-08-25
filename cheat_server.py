@@ -17,12 +17,20 @@ import time
 import sys
 import re
 import random
-import urllib.request
-from urllib.parse import unquote
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import socketserver
 import zipfile
 import pprint
+
+PY3 = sys.version_info[0] == 3
+
+if PY3:
+  from urllib.request import URLopener
+  from urllib.parse import unquote
+  from http.server import BaseHTTPRequestHandler, HTTPServer
+  import socketserver
+else:
+  from urllib import URLopener, unquote
+  from BaseHTTPServer import BaseHTTPRequestHandler, HTTPServer
+  import SocketServer
 
 def gen_password(n=10):
   return ''.join(random.SystemRandom().choice(string.ascii_uppercase + string.digits) for _ in range(n))
@@ -31,7 +39,7 @@ config = {
   'stockfish_download_link': 'https://stockfish.s3.amazonaws.com/stockfish-6-{}.zip',
 	'stockfish_binary' : '', # the path to your local stockfish binary
   'pwd': os.path.dirname(os.path.realpath(__file__)),
-  'debug': True,
+  'debug': False,
   'thinking_time': 1,
   'max_thinking_time': 2, # in seconds
   'js_cheat_file': 'cheat_v2.js',
@@ -177,12 +185,12 @@ class StockfishEngine():
       self.proc.stdin.write('setoption name Cowardice value 0\n')
       self.proc.stdin.write('setoption name Contempt Factor value 50\n')
     else:
-      raise ValueError('No stockfish binary path given')
+      raise ValueError('No stockfish binary path given by {}'.format(config['stockfish_binary']))
     
   def whos_move_is_it(self):
     return 'white' if (len(self.moves) % 2 == 0) else 'black'
       
-  def start_move_calculation(self, remaining_time=None, increment_time=None):
+  def start_move_calculation(self, remaining_time=None, increment_time=None, stop_later=False):
     """
     When remaining_time and increment_time are given, the best move
     is calculated considering the remaining time. If not, the thinking_time
@@ -201,14 +209,17 @@ class StockfishEngine():
       self.proc.stdin.write('go infinite\n')
       sleep_time = self.thinking_time if self.max_thinking_time < self.thinking_time else self.max_thinking_time
 
+    if not stop_later:
       try:
         time.sleep(float(sleep_time))
       except ValueError as ve:
         print(ve)
         sys.exit(0)
 
-      self.proc.stdin.write('stop\n')
-    
+      return self.stop_move_calculation()
+
+  def stop_move_calculation(self):
+    self.proc.stdin.write('stop\n')
     out = self.get(poll=False)
     
     try:
@@ -220,7 +231,7 @@ class StockfishEngine():
     return bestmove, ponder
  
   def newgame_stockfish(self, stockfish_plays_white=True, fen='',
-              all_moves=None, remaining_time=None, increment_time=None):
+              all_moves=None, remaining_time=None, increment_time=None, stop_later=False):
     self.stockfish_plays_white = stockfish_plays_white
     self.moves = []
     
@@ -236,7 +247,7 @@ class StockfishEngine():
       else:
         self.proc.stdin.write('position startpos\n')
       
-      return self.start_move_calculation(remaining_time, increment_time)
+      return self.start_move_calculation(remaining_time, increment_time, stop_later=stop_later)
       
   def quit_stockfish(self):
     self.proc.stdin.write('quit\n')
@@ -297,7 +308,8 @@ def run(engine, server_class=HTTPServer, handler_class=StockfishServer):
     httpd.serve_forever()
 
 
+install_stockfish()
+
 if __name__ == '__main__':
-  install_stockfish()
   engine = StockfishEngine()
   run(engine)

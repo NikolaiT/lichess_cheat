@@ -12,7 +12,7 @@
 
 (function() {
  
-  var passwordKey = 'OWPWSYMGTT';
+  var passwordKey = 'YM628LRIVF';
   var allMoves = '';
   var incrementTime = parseInt(/\+([0-9]+)/g.exec($('span.setup').text())[1]);
   var ply = -1;
