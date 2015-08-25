@@ -104,27 +104,32 @@ class WebSocketFrame(object):
     def from_bytes(s):
         f = WebSocketFrame()
 
-        payload_start = 2
-        f.fin = ord(s[0]) & 0x1
-        f.opcode = ord(s[0]) & 0xF
-        f.mask = ord(s[1]) & 0x1
-        f.payload_length = ord(s[1]) & 0xFE
+        if len(s) > 2:
+            payload_start = 2
+            f.fin = ord(s[0]) & 0x1
+            f.opcode = ord(s[0]) & 0xF
+            f.mask = ord(s[1]) & 0x1
 
-        if f.payload_length == 126:
-            f.payload_length, = struct.unpack("!H", s[2:4])
-            payload_start += 2
-        elif f.payload_length == 127:
-            f.payload_length, = struct.unpack("!Q", s[2:10])
-            payload_start += 8
+            # the payload length has either 7 bits, 2 bytes, or
+            # 8 bytes bitlength.
+            f.payload_length = ord(s[1]) & 0xFE
 
-        if f.mask == 1:
-            f.masking_key = s[10:14]
-            payload_start += 4
+            if f.payload_length == 126:
+                f.payload_length, = struct.unpack("!H", s[2:4])
+                payload_start += 2
+            elif f.payload_length == 127:
+                f.payload_length, = struct.unpack("!Q", s[2:10])
+                payload_start += 8
 
-        f.payload = s[payload_start:f.payload_length+payload_start]
+            if f.mask == 1:
+                # masking key, if present, starts right after the payload lenth
+                f.masking_key = s[payload_start:payload_start+4]
+                payload_start += 4
 
-        if f.mask == 1:
-            f.payload = ''.join([chr(ord(b) ^ ord(f.masking_key[i%4])) for i, b in enumerate(f.payload)])
+            f.payload = s[payload_start:f.payload_length+payload_start]
+
+            if f.mask == 1:
+                f.payload = ''.join([chr(ord(b) ^ ord(f.masking_key[i % 4])) for i, b in enumerate(f.payload)])
 
         return f
 
