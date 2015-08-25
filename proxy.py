@@ -97,8 +97,20 @@ class WebSocketFrame(object):
         self.payload = ''
 
     def info(self):
-        print('WebSocket Frame: fin = {}, opcode = {}, mask = {}, maskign_key: {}, payload_length = {}, payload = {}'.format(
-            self.fin, self.OPCODES.get(self.opcode, 'INVALID'), self.mask, self.masking_key, self.payload_length, self.payload))
+        import json
+        import pprint
+
+        print('WebSocket Frame: fin = {}, opcode = {}, mask = {}, masking_key: {}, payload_length = {}'.format(
+            self.fin, self.OPCODES.get(self.opcode, 'INVALID'), self.mask, self.masking_key, self.payload_length))
+        
+        print('Payload:')
+        try:
+            nice = json.loads(self.payload)            
+            pprint.pprint(nice)
+        except:
+            print(self.payload)
+        print('')
+
 
     @staticmethod
     def from_bytes(s):
@@ -138,16 +150,19 @@ class ModifyData(object):
     """Modify the TCP send and read buffer.
 
     May be used to manipulate web sockets communication. If HTTP connections 
-    are modified, hook the HTTP class directly.
-    """ 
+    are modified, hook the parsed HTTP packets directly, don't use these methods here.
+    """
+
+    modificators = []
 
     @staticmethod
     def modify_send_buffer(data):
         # some modifications
+
         frame = WebSocketFrame.from_bytes(data)
-        print('CLIENT -> SERVER')
-        frame.info()
-        print('')
+
+        for m in ModifyData.modificators:
+            m.on_outgoing_packet(frame)
 
         return data
 
@@ -155,11 +170,65 @@ class ModifyData(object):
     def modify_recv_buffer(data):
         # some modification of the recv buffer
         frame = WebSocketFrame.from_bytes(data)
-        print('SERVER -> CLIENT')
-        frame.info()
-        print('')
+
+        for m in ModifyData.modificators:
+            m.on_incoming_packet(frame)
 
         return data
+
+
+class LichessCheat(object):
+    """
+
+    Typical WebSocket communication between browser and lichess server:
+
+    Opponent makes a move:
+
+    SERVER -> CLIENT
+    WebSocket Frame: fin = 1, opcode = TEXT_FRAME, mask = 0, maskign_key: , payload_length = 274, 
+    payload = {"v":1,"t":"move","d":{"uci":"e2e4","san":"e4","fen":"rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR","ply":1,"clock":{"white":300,"black":300},"dests":{"b8":"a6c6","g8":"f6h6","h7":"h6h5","d7":"d6d5","g7":"g6g5","c7":"c6c5","f7":"f6f5","b7":"b6b5","e7":"e6e5","a7":"a6a5"}}}
+        
+
+    !!! this move is triggered by our browser UI 
+    CLIENT -> SERVER
+    WebSocket Frame: fin = 1, opcode = TEXT_FRAME, mask = 1, maskign_key: �0D�, payload_length = 182, 
+    payload = {"t":"move","d":{"from":"d7","to":"d5","b":1,"lag":43}}
+
+    !!! the server sends back our own move with more info such as the possible replies and the fen string of the position
+    SERVER -> CLIENT
+    WebSocket Frame: fin = 1, opcode = TEXT_FRAME, mask = 0, maskign_key: , payload_length = 322, 
+    payload = {"v":2,"t":"move","d":{"uci":"d7d5","san":"d5","fen":"rnbqkbnr/ppp1pppp/8/3p4/4P3/8/PPPP1PPP/RNBQKBNR","ply":2,"clock":{"white":300,"black":300},"dests":{"a2":"a3a4","g1":"f3h3e2","d1":"e2f3g4h5","e1":"e2","d2":"d3d4","b1":"a3c3","e4":"e5d5","f1":"e2d3c4b5a6","h2":"h3h4","b2":"b3b4","f2":"f3f4","c2":"c3c4","g2":"g3g4"}}}
+
+    !!! and the move from the opponent is also received with the same additional information
+    SERVER -> CLIENT
+    WebSocket Frame: fin = 1, opcode = TEXT_FRAME, mask = 0, maskign_key: , payload_length = 322, 
+    payload = {"v":3,"t":"move","d":{"uci":"e4d5","san":"exd5","fen":"rnbqkbnr/ppp1pppp/8/3P4/8/8/PPPP1PPP/RNBQKBNR","ply":3,"clock":{"white":303.3190002441406,"black":300},"dests":{"b8":"d7a6c6","c8":"d7e6f5g4h3","g8":"f6h6","h7":"h6h5","e8":"d7","g7":"g6g5","c7":"c6c5","d8":"d7d6d5","f7":"f6f5","b7":"b6b5","e7":"e6e5","a7":"a6a5"}}}
+    """
+
+    def __init__(self, debug=True):
+        self.moves = []
+        self.ply = 0
+        self.last_pos_fen = ''
+        self.debug = debug
+
+    def on_outgoing_packet(self, frame):
+        if self.debug:
+            if '"move"' in frame.payload:
+                print('CLIENT --> SERVER')
+                frame.info()
+
+        if 'from' in frame.payload and 'to' in frame.payload:
+            pass
+
+    def on_incoming_packet(self, frame):
+        if self.debug:
+            if '"move"' in frame.payload:
+                print('SERVER --> CLIENT')
+                frame.info()
+
+
+# add the lichess cheat to modify websocket frames
+ModifyData.modificators.append(LichessCheat())
 
 ### End modificiations by Nikolai Tschacher
 
