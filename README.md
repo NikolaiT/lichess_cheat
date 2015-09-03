@@ -17,6 +17,9 @@ payload = {"t":"move","d":{"from":"d7","to":"d5","b":1,"lag":43}}
 + Another idea is to inject some javascript into lichess HTTP Response that delivers the *big.js* or *round.js* javascript to the browser. At the same time I **start calulating the engine move as soon
 as the opponent move was sent by the server**. Then the injected javascript shows the move in the browser session. Optionally, the
 move is automatically made by the JS, to create a automatic cheat.
++ The basic algorithm for this is as follows:
+..1. When 
+..2. The proxy detects which color we are playing and starts calculating the next move as soon as our network card receives it. 
 + When lichess admins try to prevent this with some cheat detection javascript functionality, we will just delete the malicious javascript before it enters the browser.
 + other ideas (probably more elegant)
 

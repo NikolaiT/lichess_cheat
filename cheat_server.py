@@ -19,6 +19,7 @@ import re
 import random
 import zipfile
 import pprint
+import multiprocessing
 
 PY3 = sys.version_info[0] == 3
 
@@ -44,6 +45,7 @@ config = {
   'max_thinking_time': 2, # in seconds
   'js_cheat_file': 'cheat_v2.js',
   'password': gen_password(),
+  'password_check_enabled': False,
 }
 
 def unzip(source_filename, dest_dir):
@@ -178,8 +180,8 @@ class StockfishEngine():
       self.proc.stdin.write('ucinewgame\n')
       self.get()
       # some of theese options are not supported. Doesn't harm us...
-      self.proc.stdin.write('setoption name Hash value 128\n')
-      self.proc.stdin.write('setoption name Threads value 4\n')
+      self.proc.stdin.write('setoption name Hash value 64\n')
+      self.proc.stdin.write('setoption name Threads value 2\n')
       self.proc.stdin.write('setoption name Best Book Move value true\n')
       self.proc.stdin.write('setoption name Aggressiveness value 200\n')
       self.proc.stdin.write('setoption name Cowardice value 0\n')
@@ -240,12 +242,11 @@ class StockfishEngine():
       self.proc.stdin.write('position fen {}\n'.format(fen))
       return self.start_move_calculation(remaining_time, increment_time)
       
-    if all_moves is not None:
+    if all_moves:
       self.moves = all_moves.split(' ')
-      if all_moves:
-        self.proc.stdin.write('position startpos moves {}\n'.format(all_moves))
-      else:
-        self.proc.stdin.write('position startpos\n')
+      self.proc.stdin.write('position startpos moves {}\n'.format(all_moves))
+    else:
+      self.proc.stdin.write('position startpos\n')
       
       return self.start_move_calculation(remaining_time, increment_time, stop_later=stop_later)
       
@@ -255,7 +256,7 @@ class StockfishEngine():
   
   
 class StockfishServer(BaseHTTPRequestHandler):
-  
+
     def get_param(self, names, delimiter='/'):
       if not isinstance(names, tuple):
         raise ValueError('variable "names" must be a tuple')
@@ -267,49 +268,76 @@ class StockfishServer(BaseHTTPRequestHandler):
             name=name,
             delimiter=delimiter), self.path).group(name)
         except Exception as e:
-          ns[name] = None
-      
+          ns[name] = ''
+
       return ns
       
     def do_GET(self):
         params = {}
         best, ponder = '', ''
+        write = True
         
         if self.path.startswith('/lastPosFen_'):
           params = self.get_param(('lastPosFen', 'passwordKey'), delimiter='_')
-          best, ponder = engine.newgame_stockfish(fen=unquote(params['lastPosFen']))
+          best, ponder = self.engine.newgame_stockfish(fen=unquote(params['lastPosFen']))
         elif self.path.startswith('/allMoves/'):
           params = self.get_param(('allMoves', 'remainingTime', 'incrementTime', 'passwordKey'))
-          best, ponder = engine.newgame_stockfish(
+          best, ponder = self.engine.newgame_stockfish(
                           all_moves=unquote(params['allMoves']),
                           remaining_time=params['remainingTime'],
                           increment_time=params['incrementTime'])
+        elif self.path.startswith('/startCalculation'):
+          params = self.get_param(('allMoves', 'remainingTime', 'incrementTime'))
+          self.engine.newgame_stockfish(all_moves=unquote(params['allMoves']), stop_later=True)
+          write = False
+        elif self.path.startswith('/stopCalculation'):
+          best, ponder = self.engine.stop_move_calculation()
+          print(best, ponder)
+        else:
+          self.send_response(404)
+          self.end_headers()
+          return
 
         if config.get('debug', False):
           pprint.pprint(params)
           print('Server Key: {}, Request Key: {}'.format(config['password'], params.get('passwordKey', '')))
 
-        if params.get('passwordKey', '') == config['password']:
+        if not config['password_check_enabled'] or params.get('passwordKey', '') == config['password']:
           self.send_response(200)
           self.send_header('Access-Control-Allow-Origin', '*')
           self.send_header('Content-type', 'text/html')
           self.end_headers()
-          self.wfile.write(bytes(best + ' ' + ponder, "utf-8"))
+          if write:
+            self.wfile.write(best + ' ' + ponder)
+          else:
+            self.wfile.write('OK')
         else:
           if config.get('debug', False):
             print('Invalid request without password. Blocking.')
 
-def run(engine, server_class=HTTPServer, handler_class=StockfishServer):
-    javascript_clipboard_widget()
-    server_address = ('', 8888)
-    httpd = server_class(server_address, handler_class)
-    print('[+] Running CheatServer.py on {}:{}'.format(server_address[0], server_address[1]))
-    httpd.engine = engine
-    httpd.serve_forever()
+class StockfishServerProcess(multiprocessing.Process):
+  def __init__(self, httpd):
+      super(StockfishServerProcess, self).__init__()
+      self.httpd = httpd
 
+  def run(self):
+    self.httpd.serve_forever()
+
+def run(daemon=True):
+    engine = StockfishEngine()
+    # javascript_clipboard_widget()
+    server_address = ('', 8888)
+    StockfishServer.engine = engine
+    httpd = HTTPServer(server_address, StockfishServer)
+    print('[+] Running CheatServer.py on {}:{}'.format(server_address[0], server_address[1]))
+
+    proc = StockfishServerProcess(httpd)
+    proc.daemon = daemon
+    proc.start()
+
+    return engine
 
 install_stockfish()
 
 if __name__ == '__main__':
-  engine = StockfishEngine()
-  run(engine)
+  run(daemon=False)
